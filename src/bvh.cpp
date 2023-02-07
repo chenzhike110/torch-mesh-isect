@@ -14,7 +14,9 @@
 
    Contact: ps-license@tuebingen.mpg.de
 */
-
+#ifndef AT_CHECK
+#define AT_CHECK TORCH_CHECK
+#endif
 #include <torch/extension.h>
 
 #include <vector>
@@ -29,7 +31,7 @@ void bvh_cuda_forward(at::Tensor triangles, at::Tensor* collision_tensor_ptr,
 at::Tensor bvh_forward(at::Tensor triangles, int max_collisions = 16) {
     CHECK_INPUT(triangles);
     at::Tensor collisionTensor = -1 * at::ones({triangles.size(0),
-            triangles.size(1) * max_collisions, 2},
+            triangles.size(1) * max_collisions * 2, 2},
             at::device(triangles.device()).dtype(at::kLong));
 
     bvh_cuda_forward(triangles,

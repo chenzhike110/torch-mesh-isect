@@ -39,7 +39,7 @@
 
 // Size of the stack used to traverse the Bounding Volume Hierarchy tree
 #ifndef STACK_SIZE
-#define STACK_SIZE 64
+#define STACK_SIZE 128
 #endif /* ifndef STACK_SIZE */
 
 // Upper bound for the number of possible collisions
@@ -53,7 +53,7 @@
 
 // Number of threads per block for CUDA kernel launch
 #ifndef NUM_THREADS
-#define NUM_THREADS 128
+#define NUM_THREADS 256
 #endif
 
 #ifndef COLLISION_ORDERING
@@ -482,7 +482,7 @@ __device__ int traverseBVH(long2 *collisionIndices, BVHNodePtr<T> root,
             *stackPtr++ = childR; // push
         }
     }
-  } while (node != nullptr);
+  } while (node != nullptr && num_collisions <= max_collisions);
 
   return num_collisions;
 }
@@ -924,12 +924,12 @@ void bvh_cuda_forward(at::Tensor triangles, at::Tensor *collision_tensor_ptr,
   const auto batch_size = triangles.size(0);
   const auto num_triangles = triangles.size(1);
 
-  thrust::device_vector<int> triangle_ids(num_triangles);
+  thrust::device_vector<int> triangle_ids(num_triangles * 2);
 
   int blockSize = NUM_THREADS;
   int gridSize = (num_triangles + blockSize - 1) / blockSize;
 
-  thrust::device_vector<long2> collisionIndices(num_triangles * max_collisions);
+  thrust::device_vector<long2> collisionIndices(num_triangles * max_collisions * 2);
 
 #if PRINT_TIMINGS == 1
   cudaEvent_t start, stop;
@@ -938,15 +938,14 @@ void bvh_cuda_forward(at::Tensor triangles, at::Tensor *collision_tensor_ptr,
 #endif
 
   // int *counter;
-  thrust::device_vector<int> collision_idx_cnt(batch_size);
+  thrust::device_vector<int> collision_idx_cnt(batch_size * 2);
   thrust::fill(collision_idx_cnt.begin(), collision_idx_cnt.end(), 0);
 
   // Construct the bvh tree
   AT_DISPATCH_FLOATING_TYPES(
       triangles.type(), "bvh_tree_building", ([&] {
-        thrust::device_vector<BVHNode<scalar_t>> leaf_nodes(num_triangles);
-        thrust::device_vector<BVHNode<scalar_t>> internal_nodes(num_triangles -
-                                                                1);
+        thrust::device_vector<BVHNode<scalar_t>> leaf_nodes(num_triangles * 2);
+        thrust::device_vector<BVHNode<scalar_t>> internal_nodes(num_triangles * 2);
         auto triangle_float_ptr = triangles.data<scalar_t>();
 
         for (int bidx = 0; bidx < batch_size; ++bidx) {
@@ -967,7 +966,7 @@ void bvh_cuda_forward(at::Tensor triangles, at::Tensor *collision_tensor_ptr,
 #if DEBUG_PRINT == 1
           std::cout << "Successfully built BVH" << std::endl;
 #endif
-
+          cudaCheckError();
 #if DEBUG_PRINT == 1
           std::cout << "Launching collision detection ..." << std::endl;
 #endif
@@ -982,7 +981,7 @@ void bvh_cuda_forward(at::Tensor triangles, at::Tensor *collision_tensor_ptr,
               internal_nodes.data().get(),
               leaf_nodes.data().get(), triangle_ids.data().get(), num_triangles,
               max_collisions, &collision_idx_cnt.data().get()[bidx]);
-          cudaDeviceSynchronize();
+          // cudaDeviceSynchronize();
 
 #if PRINT_TIMINGS == 1
           cudaEventRecord(stop);
@@ -1098,6 +1097,8 @@ void bvh_cuda_forward(at::Tensor triangles, at::Tensor *collision_tensor_ptr,
                        cudaMemcpyDeviceToDevice);
             cudaCheckError();
 
+            collisions.clear();
+            collisions.shrink_to_fit();
 #if PRINT_TIMINGS == 1
             cudaEventRecord(stop);
 #endif
