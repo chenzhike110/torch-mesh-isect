@@ -39,6 +39,8 @@ provide a conical 3D distance field based loss for resolving the interpenetratio
 
 Please note that in the current implementation, for batching one needs to provide meshes with the *same* number of faces. Moreover, the code by default works for self-penetrations of a body mesh. The module can be used also for inter-penetrations of different meshes - for this the easiest and naive approach (without additional bookkeeping) is to fuse all meshes in a single mesh and treat inter-penetrations as self-penetrations.
 
+## Remind
+CUDA below 11.0 should move the files in include folder into src and add include path in setup.py
 
 ## Installation
 
