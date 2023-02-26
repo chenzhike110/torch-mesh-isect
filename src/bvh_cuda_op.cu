@@ -352,19 +352,40 @@ shareVertex(const Triangle<T> &tri1, const Triangle<T> &tri2) {
 }
 
 template <typename T>
+__device__ T weight_product(T* weight1, T* weight2, int weight_size)
+{
+  T result;
+  for (int i=0; i<weight_size; i++){
+    result += weight1[i] * weight2[i];
+  }
+  return result;
+}
+
+template <typename T>
 __global__ void checkTriangleIntersections(long2 *collisions,
+                                           float *weight,
                                            Triangle<T> *triangles,
                                            int num_cand_collisions,
-                                           int num_triangles) {
+                                           int num_triangles,
+                                           int weight_size) {
   int idx = threadIdx.x + blockDim.x * blockIdx.x;
   if (idx < num_cand_collisions) {
     int first_tri_idx = collisions[idx].x;
     int second_tri_idx = collisions[idx].y;
-
+    float prod = weight_product(weight+first_tri_idx*weight_size, weight+second_tri_idx*weight_size, weight_size);
+    // printf("%f\n", prod);
+    if (prod > 1e-4) {
+      #if PRINT_TIMINGS == 1
+        printf("checkout");
+      #endif
+      collisions[idx] = make_long2(-1, -1);
+      return;
+    }
     Triangle<T> tri1 = triangles[first_tri_idx];
     Triangle<T> tri2 = triangles[second_tri_idx];
     bool do_collide = TriangleTriangleIsectSepAxis<T>(tri1, tri2) &&
                       !shareVertex<T>(tri1, tri2);
+    
     if (do_collide) {
       collisions[idx] = make_long2(first_tri_idx, second_tri_idx);
     } else {
@@ -919,7 +940,7 @@ void buildBVH(BVHNodePtr<T> internal_nodes, BVHNodePtr<T> leaf_nodes,
   return;
 }
 
-void bvh_cuda_forward(at::Tensor triangles, at::Tensor *collision_tensor_ptr,
+void bvh_cuda_forward(at::Tensor triangles, at::Tensor weights, at::Tensor *collision_tensor_ptr,
                       int max_collisions = 16) {
   const auto batch_size = triangles.size(0);
   const auto num_triangles = triangles.size(1);
@@ -940,6 +961,13 @@ void bvh_cuda_forward(at::Tensor triangles, at::Tensor *collision_tensor_ptr,
   // int *counter;
   thrust::device_vector<int> collision_idx_cnt(batch_size * 2);
   thrust::fill(collision_idx_cnt.begin(), collision_idx_cnt.end(), 0);
+  auto data = weights.data_ptr<float>();
+  // Eigen::Map<Eigen::MatrixXf> weight_matrix(data, weights.size(0), weights.size(1));
+  thrust::device_vector<float> weight_matrix(data, data+weights.size(0)*weights.size(1));
+  // for (int i = 0; i < weights.size[0]; i++) 
+  // {
+  //   for (int j = 0; j < weights)
+  // }
 
   // Construct the bvh tree
   AT_DISPATCH_FLOATING_TYPES(
@@ -947,7 +975,6 @@ void bvh_cuda_forward(at::Tensor triangles, at::Tensor *collision_tensor_ptr,
         thrust::device_vector<BVHNode<scalar_t>> leaf_nodes(num_triangles * 2);
         thrust::device_vector<BVHNode<scalar_t>> internal_nodes(num_triangles * 2);
         auto triangle_float_ptr = triangles.data<scalar_t>();
-
         for (int bidx = 0; bidx < batch_size; ++bidx) {
 
           Triangle<scalar_t> *triangles_ptr =
@@ -1067,8 +1094,8 @@ void bvh_cuda_forward(at::Tensor triangles, at::Tensor *collision_tensor_ptr,
             int tri_grid_size =
                 (collisions.size() + blockSize - 1) / blockSize;
             checkTriangleIntersections<scalar_t><<<tri_grid_size, blockSize>>>(
-                collisions.data().get(), triangles_ptr, collisions.size(),
-                num_triangles);
+                collisions.data().get(), weight_matrix.data().get(), triangles_ptr, collisions.size(),
+                num_triangles, weights.size(1));
 #if PRINT_TIMINGS == 1
             cudaEventRecord(stop);
 #endif

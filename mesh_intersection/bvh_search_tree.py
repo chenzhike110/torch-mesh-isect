@@ -34,8 +34,9 @@ class BVHFunction(autograd.Function):
 
     @staticmethod
     @torch.no_grad()
-    def forward(ctx, triangles):
+    def forward(ctx, triangles, weights):
         outputs = bvh_cuda.forward(triangles,
+                                   weights,
                                    max_collisions=BVHFunction.max_collisions)
         ctx.save_for_backward(outputs, triangles)
         return outputs
@@ -53,4 +54,8 @@ class BVH(nn.Module):
         BVHFunction.max_collisions = self.max_collisions
 
     def forward(self, triangles):
-        return BVHFunction.apply(triangles)
+        weights = torch.diag(torch.ones(triangles.shape[1]))
+        return BVHFunction.apply(triangles, weights)
+    
+    def search(self, triangles, weights):
+        return BVHFunction.apply(triangles, weights)
