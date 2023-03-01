@@ -54,7 +54,7 @@ class BVH(nn.Module):
         BVHFunction.max_collisions = self.max_collisions
 
     def forward(self, triangles):
-        weights = torch.diag(torch.ones(triangles.shape[1]))
+        weights = torch.zeros(triangles.shape[1], 2)
         return BVHFunction.apply(triangles, weights)
     
     def search(self, triangles, weights):
